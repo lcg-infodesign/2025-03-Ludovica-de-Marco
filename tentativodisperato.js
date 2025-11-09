@@ -17,6 +17,7 @@ let palette = [
 let hoveredVolcano = null;
 
 function preload() {
+  // Assicurati che il file 'volcanoes.csv' sia nella stessa cartella
   table = loadTable("volcanoes.csv", "csv", "header"); 
 }
 
@@ -24,7 +25,6 @@ function setup() {
   createCanvas(windowWidth, windowHeight);
   
   parseData();
-  
   
   // Calcola i limiti geografici dinamicamente
   let allLon = volcanoes.map(v => v.lon);
@@ -39,14 +39,11 @@ function setup() {
   for (let i = 0; i < palette.length; i++) {
     palette[i] = color(palette[i]);
   }
-
-  // Forza la prima esecuzione di draw
-  redraw(); 
 }
 
 function parseData() {
   for (let r = 0; r < table.getRowCount(); r++) {
-    // Recupero tutti i dati rilevanti, inclusi quelli per il tooltip
+    // Recupero tutti i dati rilevanti
     let v_num = table.getString(r, "Volcano Number");
     let v_name = table.getString(r, "Volcano Name");
     let country = table.getString(r, "Country");
@@ -55,12 +52,16 @@ function parseData() {
     let lon = float(table.getString(r, "Longitude"));
     let elevRaw = table.getString(r, "Elevation (m)");
     let elev = elevRaw === "" ? null : float(elevRaw);
+    let status = table.getString(r, "Status"); 
+    let lastEruption = table.getString(r, "Last Known Eruption"); // Campo per l'animazione D1
 
     if (!isNaN(lat) && !isNaN(lon)) {
       volcanoes.push({ 
           v_num, v_name, country, v_type, lat, lon, 
           elev,
-          elevRaw 
+          elevRaw,
+          status,
+          lastEruption 
       });
     }
   }
@@ -115,7 +116,7 @@ function project(lat, lon) {
   // Mappatura X (margine OUTER_MARGIN a sinistra e a destra)
   let x = map(lon, minLon, maxLon, OUTER_MARGIN, width - OUTER_MARGIN);
   
-  // Mappatura Y (0 in alto, MARGIN_BOTTOM in basso)
+  // Mappatura Y (OUTER_MARGIN in alto, MARGIN_BOTTOM in basso)
   let y = map(lat, minLat, maxLat, height - MARGIN_BOTTOM, OUTER_MARGIN); 
   return { x, y };
 }
@@ -123,7 +124,7 @@ function project(lat, lon) {
 // Calcola il colore in base all'elevazione usando l'interpolazione della palette.
 function getColorFromElevation(elev) {
   if (elev === null || isNaN(elev)) {
-    return palette[0]; // Ritorna il colore più scuro per i dati mancanti
+    return palette[0]; 
   }
 
   let t = map(elev, MIN_ELEV, MAX_ELEV, 0, palette.length - 1);
@@ -137,53 +138,112 @@ function getColorFromElevation(elev) {
   return lerpColor(c1, c2, frac);
 }
 
-//Se scaleFactor > 1.0, il pallino diventa bianco.
+//Funzione per disegnare il cerchio del vulcano con interattività e animazione.
 function drawInteractiveCircle(v, scaleFactor) {
-    let size = v.elev !== null && !isNaN(v.elev)
+    let baseSize = v.elev !== null && !isNaN(v.elev)
       ? map(v.elev, MIN_ELEV, MAX_ELEV, 4, 10)
       : 6;
       
-    // LOGICA HOVER: Se si passa il mouse (scaleFactor > 1.0) usa il bianco.
-    if (scaleFactor > 1.0) {
-        fill(255); // Bianco
-    } else {
-        let c = getColorFromElevation(v.elev);
-        fill(c); // Colore basato sull'elevazione
-    }
+    let currentSize = baseSize * scaleFactor;
+    
+    // CONDIZIONE PER L'ANIMAZIONE: Attiva l'effetto SOLTANTO se l'ultima eruzione è D1 E non è in hover
+    const isRecentlyActive = v.lastEruption === "D1";
 
-    // Disegna il cerchio con il fattore di scala applicato
-    ellipse(v.x, v.y, size * scaleFactor, size * scaleFactor);
+    if (isRecentlyActive && scaleFactor === 1.0) {
+        let pulse = 0.5 + 0.5 * sin(frameCount * 0.15); 
+        let baseColor = getColorFromElevation(v.elev);
+
+        // --- Disegno dell'alone luminoso e cangiante (PALLA DI FUOCO) ---
+        drawingContext.filter = "blur(8px)"; // Filtro di sfocatura
+        
+        // Cerchio più esterno (il glow maggiore)
+        let outerGlowColor = lerpColor(baseColor, color(255, 200, 0, 150), pulse * 0.8); 
+        fill(outerGlowColor);
+        ellipse(v.x, v.y, currentSize * (2.5 + pulse * 0.8), currentSize * (2.5 + pulse * 0.8)); 
+
+        // Cerchio intermedio
+        let midGlowColor = lerpColor(baseColor, color(255, 150, 0, 200), pulse * 0.5); 
+        fill(midGlowColor);
+        ellipse(v.x, v.y, currentSize * (1.8 + pulse * 0.5), currentSize * (1.8 + pulse * 0.5)); 
+
+        drawingContext.filter = "none"; // Disattiva il blur prima del nucleo
+
+        // Cerchio interno (il nucleo)
+        let innerColor = lerpColor(baseColor, color(255, 255, 0), pulse * 0.3); 
+        innerColor.setAlpha(255); 
+        fill(innerColor);
+        ellipse(v.x, v.y, currentSize * (1.0 + pulse * 0.2), currentSize * (1.0 + pulse * 0.2)); 
+        
+        drawingContext.filter = "none"; 
+
+    } else {
+        // LOGICA HOVER / VULCANI NON ANIMATI
+        if (scaleFactor > 1.0) {
+            fill(255); // Bianco in hover
+        } else {
+            let c = getColorFromElevation(v.elev);
+            fill(c); // Colore base
+        }
+        // Disegna il cerchio normale (o bianco per hover)
+        ellipse(v.x, v.y, currentSize, currentSize);
+    }
 }
 
-//Disegna una scheda informativa (tooltip) vicino al vulcano hovered.
+//Disegna una scheda informativa (tooltip) vicino al vulcano hovered con gestione dei bordi.
 function drawTooltip(v) {
-  let tooltipX = mouseX + 15;
-  let tooltipY = mouseY + 5;
-
   let name = v.v_name || "N/A";
   let country = v.country || "N/A";
   let elev = v.elevRaw === "" || v.elevRaw === null ? "N/A" : `${v.elevRaw} m`;
   let type = v.v_type || "N/A";
-  let coords = `${v.lat.toFixed(2)}°, ${v.lon.toFixed(2)}°`;
+  let status = v.status || "N/A"; 
 
   let tooltipText = 
 `Volcan: ${name}
 Country: ${country}
 Elevation: ${elev}
 Type: ${type}
-Coords: ${coords}`;
+Status: ${status}`;
 
   textSize(14);
   textAlign(LEFT, TOP);
   
-  // Sfondo del tooltip (calcolo della larghezza per adattarsi al testo)
+  // Calcolo della larghezza e altezza del box
   let boxWidth = max(tooltipText.split('\n').map(line => textWidth(line))) + 20; 
   let boxHeight = 85;
+
+  let tooltipX;
+  let tooltipY;
+  const margin = 15; // Margine tra cursore e box
+
+  // 1. GESTIONE POSIZIONE X (BORDO DESTRO)
+  // Se il mouse è troppo vicino al bordo destro (mouseY + larghezza del box > larghezza totale)
+  if (mouseX + boxWidth + margin + 5 > width) {
+      // Disegna il tooltip A SINISTRA del cursore
+      tooltipX = mouseX - margin - boxWidth;
+  } else {
+      // Disegna il tooltip A DESTRA del cursore (default)
+      tooltipX = mouseX + margin;
+  }
+  
+  // GESTIONE POSIZIONE Y (BORDO INFERIORE)
+  // Se il mouse è troppo vicino al bordo inferiore (mouseY + altezza del box > altezza totale)
+  if (mouseY + boxHeight + margin > height) {
+      // Disegna il tooltip SOPRA il cursore
+      tooltipY = mouseY - margin - boxHeight;
+  } else {
+      // Disegna il tooltip SOTTO il cursore (default)
+      tooltipY = mouseY + margin;
+  }
+  
+  
+  // Sfondo del tooltip (Nero semi-trasparente)
   fill(0, 200); 
   noStroke();
+  
+  // Disegna il rettangolo usando le coordinate aggiustate
   rect(tooltipX - 5, tooltipY - 5, boxWidth, boxHeight, 5); 
 
-  // Testo del tooltip
+  // Testo del tooltip (Bianco)
   fill(255);
   text(tooltipText, tooltipX, tooltipY);
 }

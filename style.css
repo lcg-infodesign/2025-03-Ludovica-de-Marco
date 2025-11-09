@@ -13,9 +13,8 @@ html, body {
 }
 
 .titolo {
-  font-size:20rem;
+  font-size:24rem;
   font-family: "fit", sans-serif;
-  font-weight: 50;
   font-style: normal;
   color: rgb(220, 2, 2);
   font-weight: bold;
@@ -23,12 +22,15 @@ html, body {
 }
 
 .sottotitolo {
-  font-size: 1.3rem;
-  font-family: "futura", sans-serif;
+  font-size: 1 rem;
+  font-family: "fira-sans", sans-serif;
+font-weight: 400;
+font-style: normal;
   color: rgb(220, 2, 2);
-  margin-top: none;
+  margin-top: -30px;
 }
 
 canvas {
   display: block;
 }
+
